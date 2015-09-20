@@ -1,0 +1,141 @@
+---
+title: "Natural Language Processing"
+author: "Richard Soon"
+date: "Sunday, July 12, 2015"
+output: html_document
+---
+
+This report is the assignment of Capstone Project of Data Science Specialization Courses. The main task is to analyze the given text documents or corpus, explore the statistical features of words or sentences.
+
+1.Download and read the data
+We download the provided dataset Coursera-SwiftKey.zip, and unzipped all the text file in a local directory.
+```{r,cache=TRUE,eval=FALSE}
+url<-"https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip"
+download.file(url,"Coursera-SwiftKey.zip")
+dateDownloaded<-date()
+unzip("Coursera-SwiftKey.zip")
+list.files()
+```
+There are four directories containing files in German, English, Finnish and Russian respectively. We begin from the most familar language-English, as those four languages above are all alphabetic, if we can solve problems of texts in English successfully, analogously we can apply the same tactics to the other languages.
+```{r}
+path="final/en_US"
+list.files(path)
+file.size("final/en_US/en_US.blogs.txt")
+file.size("final/en_US/en_US.news.txt")
+file.size("final/en_US/en_US.twitter.txt")
+```
+In Folder en_US, three texts files are included, by whose names, it can be infered that the contents are originated from blogs, news and twitter messages. The size of each text file is over 150M, rather large. 
+```{r,cache=TRUE}
+conn<-file("final/en_US/en_US.blogs.txt",encoding="UTF-8")
+blogs<-readLines(conn,warn=F)
+conn<-file("final/en_US/en_US.news.txt",encoding="UTF-8")
+news<-readLines(conn,warn=F)
+conn<-file("final/en_US/en_US.twitter.txt",encoding="UTF-8")
+twitter<-readLines(conn,warn=F)
+close(conn)
+```
+All the text data has been loaded. Now let's have a look at these text files.
+```{r}
+length(blogs)
+head(blogs,2)
+length(news)
+head(news,2)
+length(twitter)
+head(twitter,2)
+```
+There are 899288 lines, a huge number. In order to speed up the processing, we sample the contents of the lines instead of loading all the contents. 
+```{r}
+selection<-rbinom(length(blogs),1,prob=0.01)
+selection<-as.logical(selection)
+blogs2<-blogs[selection]
+selection<-rbinom(length(news),1,prob=0.01)
+selection<-as.logical(selection)
+news2<-news[selection]
+selection<-rbinom(length(twitter),1,prob=0.01)
+selection<-as.logical(selection)
+twitter2<-twitter[selection]
+```
+I think there are differences among blogs, news and twitter texts, so we combine the samples together. To save memory, delete original data of blogs, twitter and news
+```{r}
+texts<-c(blogs2,news2,twitter2)
+rm(blogs)
+rm(news)
+rm(twitter)
+```
+
+There're several complete sentences in each line, some are short and others are very lone, let's count how many chars for each line.
+```{r}
+library(ggplot2)
+lens_blogs<-sapply(texts,nchar)
+summary(lens_blogs)
+qplot(lens_blogs,binwidth = 2,xlab="Length of chars",title="Histogram of Chars' Lengths")
+```
+It is clear from the histogram that most lines have less than 121 chars, and the average is approximate 115. 
+
+2.Clean and tidy the texts
+Next, we're going to clean the text contents. One pre-task is to handle profane words(foul language), which can be collected through google. We choose 100 profane words from website: "http://onlineslangdictionary.com/lists/most-vulgar-words/", and we save them in a text file "profanewords.txt". Here we'd like to use tm package which provides many useful tools to facilitate the process.
+```{r}
+library(tm)
+conn<-file("profanewords.txt",encoding="UTF-8")
+profanewords<-readLines(conn,warn=F)
+close(conn)
+head(profanewords)
+texts<-sapply(texts,removeWords,profanewords)
+```
+Also, we remove extra white blanks, numerals , unknown language, then turn words into lower forms. 
+```{r}
+replacewords<-function(line,wordA,wordB){gsub(wordA,wordB,line)}
+texts<-sapply(texts,replacewords,"[^0-9a-zA-Z]"," ")
+texts<-sapply(texts,stripWhitespace)
+texts<-sapply(texts,removeNumbers)
+texts<-sapply(texts,tolower)
+```
+
+But there's a problem, abbreviations such as "don't", "isn't" can cause some mistakes, therefore, we replace them with full words. After that, we remove some inner dashes between letters or words
+```{r}
+abb<-c("don¡¯t", "isn¡¯t", "i¡¯m", "can¡¯t","¡¯re","he¡¯s","she¡¯s","it¡¯s","wasn¡¯t","didn¡¯t","haven¡¯t","hadn¡¯t","doesn¡¯t")
+full<-c("do not","is not","i am","can not"," are","he is","she is","it is","was not","did not","have not","had not","does not")
+for(i in 1:length(abb))
+{
+  blogs2<-sapply(texts,replacewords,abb[i],full[i])
+}
+texts<-sapply(texts,removePunctuation)
+texts<-stemDocument(texts)
+```
+
+3.Tokenize the texts
+And we have to specify those separators such as period, blank, in order to split those words correctly.
+```{r}
+separators<-"[ .,?!:;¡°¡±_()$¡­=>]"
+splitwords<-function(x,separators){strsplit(x,separators)}
+blogs_words<-sapply(texts,splitwords,separators)
+head(blogs_words,1)
+```
+Here, we get the tokens of each line.Let's put them together and check the frequence of each word.
+```{r}
+wordset<-NULL
+for(characters in blogs_words)
+  {
+  wordset<-c(wordset,characters)
+  }
+word_tokens<-sort(table(wordset),decreasing=T)
+word_tokens<-word_tokens[-1]
+write.csv(word_tokens,"blogs_tokens.csv")
+head(word_tokens)
+tail(word_tokens)
+```
+The most frequent words are articles, prepositions. This can be explicated by English grammar, articles, linking words are widely used in daily speeches.Actually, these words are called stop words which mean less significance.
+```{r}
+mystopwords<-stopwords(kind="en")
+wordset<-removeWords(wordset,mystopwords)
+word_tokens<-sort(table(wordset),decreasing=T)
+word_tokens<-word_tokens[-1]
+head(word_tokens)
+```
+That's what we need in order to make predictions. The most frequent words are much more meaningful. 
+```{r}
+summary(word_tokens)
+barplot(head(word_tokens,20),col=rainbow(20))
+```
+And now, we can calculate the probability of each word. Based on the processing, we will develop a shiny app which includes five parts: Get the text data, clean the contents, tokenize the texts, build n-grams models, make predictions.
+

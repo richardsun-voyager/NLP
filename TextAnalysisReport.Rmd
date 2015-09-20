@@ -1,0 +1,717 @@
+---
+title: "TextAnalysis"
+author: "RichardSun"
+date: "Wednesday, August 12, 2015"
+output: html_document
+---
+
+##Summary
+This markdown file is the my capstone project of data science specialization courses on Coursera.  Based on data sets from a corpus called HC Corpora, we apply fundamental concepts and methods of natural language processing to analyze the properties of text contents, and then build 1, 2, 3, 4-gram models to train the data, finally we make predictions. In order to increase efficiency, tm package is used below.
+
+##Load the data
+We have downloaded and unzipped the original data in our local path. First, we load them into memory.
+```{r,cache=TRUE}
+library(tm)
+ds<-DirSource("en_US",encoding="UTF-8",mode="text")
+cp<-Corpus(ds,readerControl = list(reader = readPlain,load=T,language="en"))
+inspect(cp)
+length(cp[[1]]$content)
+length(cp[[2]]$content)
+length(cp[[3]]$content)
+```
+
+There are 3 text files, and each has millions of chars. 
+```{r,cache=TRUE}
+object.size(cp)
+```
+
+The occupied memory size is quite large, considering the calculating capability of my computer, we had better sample the corpus. 
+```{r,cache=TRUE}
+len<-length(cp[[1]]$content)
+cp[[1]]$content<-sample(cp[[1]]$content,len/50)
+len<-length(cp[[2]]$content)
+cp[[2]]$content<-sample(cp[[2]]$content,len/50)
+len<-length(cp[[3]]$content)
+cp[[3]]$content<-sample(cp[[3]]$content,len/50)
+```
+
+We randomly choose some texts as training data sets and testing data sets.
+```{r,cache=TRUE}
+set.seed(111)
+ct<-cp
+selection<-sample(length(cp[[1]]$content),300)
+ct[[1]]$content<-ct[[1]]$content[selection]
+cp[[1]]$content<-cp[[1]]$content[-selection]
+selection<-sample(length(cp[[2]]$content),30)
+ct[[2]]$content<-ct[[2]]$content[selection]
+cp[[2]]$content<-cp[[2]]$content[-selection]
+selection<-sample(length(cp[[3]]$content),600)
+ct[[3]]$content<-ct[[3]]$content[selection]
+cp[[3]]$content<-cp[[3]]$content[-selection]
+```
+
+##Tidy the data
+The real data sets contain complex texts, such as numbers, punctuations, foreign signs. Before we handle them, we need tidy them. 
+
+We remove extra blanks, numbers as well as foreign languages which may paly negative role in word processing.
+```{r,cache=TRUE}
+cp<-tm_map(cp,content_transformer(stripWhitespace))
+cp<-tm_map(cp,content_transformer(removeNumbers))
+replacewords<-function(line,wordA,wordB){gsub(wordA,wordB,line)}
+cp<-tm_map(cp,content_transformer(replacewords),"[^0-9a-zA-Z,.:!?'¡¯ -]"," ")
+```
+
+As for the punctuation, English words are separated by blanks, comma, period and etc, we keep them, but we need remove dashes. After all is done, we turn the letters into lower form.
+```{r}
+cp<-tm_map(cp,content_transformer(replacewords),"[-]","")
+cp<-tm_map(cp,content_transformer(tolower))
+```
+
+One procedure is to get rid of profane words, or foul language in my understanding. We searched English profane words on google, and saved it in a txt file.
+```{r}
+conn<-file("profanewords.txt",encoding="UTF-8")
+profanewords<-readLines(conn,warn=F)
+close(conn)
+cp<-tm_map(cp,content_transformer(removeWords),profanewords)
+```
+
+Also, abbreviations like "it's" can be deemed as one word or two words "it is", here we replace them with full words.
+```{r}
+#complete the abbreviation
+abb<-c("don[¡¯']t", "isn[¡¯']t", "i[¡¯']m", "can[¡¯']t","[¡¯']re","he[¡¯']s","she[¡¯']s","it[¡¯']s","wasn[¡¯']t","didn[¡¯']t","haven[¡¯']t","hadn[¡¯']t","doesn[¡¯']t","[¡¯']d like","[¡¯']d better","[¡¯']d","let[¡®¡¯']s","that['¡®¡¯]s")
+full<-c("do not","is not","i am","can not"," are","he is","she is","it is","was not","did not","have not","had not","does not"," would like"," had better","would","let us"," that is")
+for(i in 1:length(abb))
+{
+cp<-tm_map(cp,content_transformer(replacewords),abb[i],full[i])
+}
+```
+
+##Tokenize
+We have handled the original data, now we tokenize those texts.
+```{r}
+tokens1<-MC_tokenizer(cp[[1]]$content)
+tokens2<-MC_tokenizer(cp[[2]]$content)
+tokens3<-MC_tokenizer(cp[[3]]$content)
+tokens1<-tokens1[tokens1!=""]
+tokens2<-tokens1[tokens2!=""]
+tokens3<-tokens1[tokens3!=""]
+word_table1<-sort(table(tokens1),decreasing=T)
+word_table2<-sort(table(tokens2),decreasing=T)
+word_table3<-sort(table(tokens3),decreasing=T)
+head(word_table1);head(word_table2);head(word_table3)
+```
+
+The most frequent words are almost identical for these three text files.
+```{r}
+summary(word_table1)
+summary(word_table2)
+summary(word_table3)
+```
+
+##N-gram Tokens
+In order to explore the relationships between words, we need calculate n-gram in advance. Basically, we will consider unigram, bigram, trigram and 4-gram tokens. Actually, in theory, we can also build high gram models such as 5, 6, 7 grams, but they are not so effective. In order to speed up the process, we make use of RWeka package.
+#1. Unigram 
+It is clear that most words occur less than 3 times in the provided corpus, many words only occur once. In the following steps, we take three sources of texts into account together.
+```{r}
+tokens<-c(tokens1,tokens2,tokens3)
+word_table<-sort(table(tokens),decreasing=T)
+barplot(word_table)
+```
+
+The tail words look like typos, or spelling mistakes, one method is to match them in a large dictionary which will definitely increase the burden of my laptop. As they do not appear much in those corpus, we can neglect them.
+```{r}
+library(data.table)
+unigram_df <- data.table(word = names(word_table),freq=word_table)
+write.csv(unigram_df,"unigram.csv")
+```
+
+Use wordcloud to illustrate the first 500 words.
+```{r}
+library(wordcloud)
+wordcloud(head(names(v),500),head(v,500),colors=c("black","yellow"))
+```
+
+#2.Bigram
+Analogously, we can calculate 2-gram, 3-gram, 4-gram tokens.
+```{r}
+library(RWeka)
+BigramTokenizer <- function(x) NGramTokenizer(x, Weka_control(min = 2, max = 2))
+tdm2<-TermDocumentMatrix(cp,control=list(tokenize=BigramTokenizer))
+tdm2
+tdm2<-removeSparseTerms(tdm2,0.63)
+b<-as.matrix(tdm2)
+v <- sort(rowSums(b),decreasing=TRUE)
+head(v)
+bigram_df <- data.table(word = names(v),freq=v)
+write.csv(bigram_df,"bigram.csv")
+wordcloud(head(names(v),500),head(v,500),colors=c("black","yellow"))
+```
+
+#3.Trigram
+```{r}
+TrigramTokenizer <- function(x) NGramTokenizer(x, Weka_control(min = 3, max = 3))
+tdm3<-TermDocumentMatrix(cp,control=list(tokenize=TrigramTokenizer))
+tdm3<-removeSparseTerms(tdm3,0.66)
+b<-as.matrix(tdm3)
+v <- sort(rowSums(b),decreasing=TRUE)
+head(v)
+trigram_df <- data.table(word = names(v),freq=v)
+write.csv(trigram_df,"trigram.csv")
+wordcloud(head(names(v),500),head(v,500))
+```
+
+#4. 4-gram
+```{r}
+FourgramTokenizer <- function(x) NGramTokenizer(x, Weka_control(min = 4, max = 4))
+tdm4<-TermDocumentMatrix(cp,control=list(tokenize=FourgramTokenizer ))
+tdm4
+tdm4<-removeSparseTerms(tdm4,0.66)
+b<-as.matrix(tdm4)
+v <- sort(rowSums(b),decreasing=TRUE)
+fourgram_df <- data.table(word = names(v),freq=v)
+write.csv(fourgram_df,"fourgram.csv")
+wordcloud(head(names(v),500),head(v,500))
+```
+
+#Build lookup tables
+Based on those term frequencies, we can build lookup data tables for latter prediction. First we define a function to split tokens into previous words and predicting words.
+```{r}
+#Split the words into 2 parts
+splitWords<-function(term,n)
+  {
+  words<-NULL
+  word1<-NULL
+  word2<-NULL
+  ind<-unlist(gregexpr(" ",term))
+  len<-length(ind)
+  if(all(ind)>0)
+    {
+    word1<-substr(term,1,ind[len]-1)
+    word2<-substr(term,ind[len]+1,nchar(term))
+    }
+  words<-c(word1,word2)
+  words[n]
+  }
+```
+
+Now, we are going to create lookup tables.
+```{r}
+library(plyr)
+library(dplyr)
+prevWords<-unlist(sapply(bigram_df$word,splitWords,1))
+predWords<-unlist(sapply(bigram_df$word,splitWords,2))
+bigram_df$prev<-prevWords
+bigram_df$pred<-predWords
+prevWords<-unlist(sapply(trigram_df$word,splitWords,1))
+predWords<-unlist(sapply(trigram_df$word,splitWords,2))
+trigram_df$prev<-prevWords
+trigram_df$pred<-predWords
+prevWords<-unlist(sapply(fourgram_df$word,splitWords,1))
+predWords<-unlist(sapply(fourgram_df$word,splitWords,2))
+fourgram_df$prev<-prevWords
+fourgram_df$pred<-predWords
+temp<-unigram_df
+temp<-dplyr::rename(temp,prev=word)
+temp<-dplyr::rename(temp,freq1=freq)
+bigramLookup<-join(temp,bigram_df,by="prev",type="right")
+bigramLookup$prob<-bigramLookup$freq/bigramLookup$freq1
+temp<-bigram_df
+temp$prev<-NULL
+temp$pred<-NULL
+temp<-dplyr::rename(temp,prev=word)
+temp<-dplyr::rename(temp,freq1=freq)
+trigramLookup<-join(temp,trigram_df,by="prev",type="right")
+trigramLookup$prob<-trigramLookup$freq/trigramLookup$freq1
+temp<-trigram_df
+temp$prev<-NULL
+temp$pred<-NULL
+temp<-dplyr::rename(temp,prev=word)
+temp<-dplyr::rename(temp,freq1=freq)
+fourgramLookup<-join(temp,fourgram_df,by="prev",type="right")
+unigramLookup<-unigram_df
+unigramLookup$prob<-unigram_df$freq/sum(unigram_df$freq)
+```
+
+We need save those lookups which can be applied in Shiny.
+```{r}
+write.csv(unigramLookup,"unigramLookup,csv")
+write.csv(bigramLookup,"bigramLookup,csv")
+write.csv(trigramLookup,"trigramLookup,csv")
+write.csv(fourgramLookup,"fourgramLookup,csv")
+```
+
+
+##Simple models
+The simple idea of predicting next word is making use of n-gram tokens. It is not effetive to predict the next word based on the entire sentence, especially when the sentence is long and complicated. Therefore, we consider Markov chain, which means we only take the last few words into account. Before the prediction, we need tidy the testing data sets. We predict last words of the sentences.
+```{r}
+ct<-tm_map(ct,content_transformer(stripWhitespace))
+ct<-tm_map(ct,content_transformer(removeNumbers))
+ct<-tm_map(ct,content_transformer(replacewords),"[^0-9a-zA-Z,.:!?'¡¯ -]"," ")
+ct<-tm_map(ct,content_transformer(replacewords),"[-]","")
+ct<-tm_map(ct,content_transformer(tolower))
+ct<-tm_map(ct,content_transformer(removeWords),profanewords)
+for(i in 1:length(abb))
+{
+ct<-tm_map(ct,content_transformer(replacewords),abb[i],full[i])
+}
+texts<-NULL
+for(i in 1:length(ct))
+  {
+  texts<-c(texts,ct[[i]]$content)
+  }
+lineTokens<-sapply(texts,MC_tokenizer)
+```
+
+#1.Unigram Model
+The prediction does not matter with the previous words, the last word is always the most frequent word, obviously the accuracy is not satisfying.
+```{r}
+count<-0
+prediction<-unigram_df$word[1]
+for(words in lineTokens)
+  {
+  len<-length(words)
+  last<-words[len]
+  if(last==prediction)
+     count=count+1
+  }
+accuracy<-count/length(texts)
+accuracy
+```
+
+The accuracy is 0. 
+
+#2.Bigram Model
+Find the largest probability of P(next word|last word).
+```{r}
+count<-0
+system.time(
+for(words in lineTokens)
+  {
+  predictions<-NULL
+  names(words)<-NULL
+  len<-length(words)
+  if(len>1)
+    {
+  word<-words[len-1]
+  end<-words[len]
+  rows<-bigramLookup[bigramLookup$prev==word,]
+  pred<-NULL
+  if(dim(rows)[1]>0)
+    pred<-rows$pred[1]
+  if(!is.null(pred))
+  if(end==pred)
+     count=count+1
+  }
+  }
+)
+accuracy<-count/length(lineTokens)
+accuracy
+```
+
+The accuracy is 0.026, still rather low.
+
+#3.Trigram Model
+We use the term which has the most probability as the prediction.
+```{r}
+count<-0
+system.time(
+for(words in lineTokens)
+  {
+  predictions<-NULL
+  term<-NULL
+  names(words)<-NULL
+  len<-length(words)
+  if(len>2)
+    {
+    word1<-words[len-2]
+    word2<-words[len-1]
+    end<-words[len]
+    term<-paste(word1,word2)
+    rows<-trigramLookup[trigramLookup$prev==term,]
+    pred<-NULL
+    if(dim(rows)[1]>0)
+       pred<-rows$pred[1]
+    if(!is.null(pred))
+     if(end==pred)
+      count=count+1
+    }
+  }
+)
+accuracy<-count/length(lineTokens)
+accuracy
+```
+
+The accuracy is 0.032, which looks better than that of 2-gram model. The required time is less than 1 minute, feasible on my computer.
+
+Also we try perplexity for different models, allowing for the computing capability, we select short testing sentences withou punctuations. Here, chain rules and Markov rule.
+```{r}
+isEmpty<-function(line)
+  {
+  line<-unlist(line)
+  bflag<-F
+  if(any(line==""))
+    bflag<-T
+  bflag
+  }
+lens<-sapply(lineTokens,length)
+isempty<-sapply(lineTokens,isEmpty)
+summary(lens)
+newLines<-data.table(tokens=lineTokens,lens=lens,isempty=isempty)
+newLines<-newLines[newLines$lens<10,]
+newLines<-newLines[!newLines$isempty,]
+```
+
+We calculate unigram perplexity. If the word is not in the table, we assume the frequence is 1. Note, (P1*p2)^(-1/n)=(1/p1*1/p2)^(1/n), due to the precision, we calculate the 1/pi instead. if there are some words not in the tables, here we adopt add-1 strategy.
+```{r}
+calPpx1<-function(words)
+  {
+  p<-1
+  words<-unlist(words)
+  n<-length(words)
+  if(n>0)
+  {
+    for(i in 1:n)
+    {
+    row<-unigramLookup[unigramLookup$word==words[i],]
+    if(!is.null(row)&&dim(row)[1]>0&&!is.na(row$prob)&&row$prob>0)
+      p<-p/row$prob
+    else
+      p<-p*sum(unigramLookup$freq)
+    }
+    p<-p^(1/n)
+  }
+  else
+    p<-sum(unigramLookup$freq)
+  p
+  }
+ppxs<-sapply(newLines$tokens,calPpx1)
+summary(ppxs)
+```
+
+The max value is too large, which affects the real results too much. Let's remove them.
+```{r}
+ppxs<-ppxs[ppxs<300000]
+summary(ppxs)
+```
+The median is 1561, and the mean is 6551.
+
+bigram perplexity. if the word is not in the table, we assume the frequence is 1.
+```{r}
+calPpx2<-function(words)
+  {
+  p<-1
+  words<-unlist(words)
+  n<-length(words)
+  if(n==1)
+    p<-calPpx1(words)
+  if(n>1)
+  {
+    p<-calPpx1(words[1])
+    for(i in 1:(n-1))
+    {
+    row<-bigramLookup[bigramLookup$word==paste(words[i],words[i+1]),]
+    if(!is.null(row)&&dim(row)[1]>0&&!is.na(row$prob)&&row$prob>0)
+      p<-p/row$prob
+    else
+      {
+        row<-bigramLookup[bigramLookup$prev==words[i],]
+        if(!is.null(row)&&dim(row)[1]>0)
+          p<-p*row$freq1[1]
+        else
+          p<-p*sum(unigramLookup$freq)
+      }
+    }
+    p<-p^(1/n)
+  }
+  if(n==0)
+    p<-sum(unigramLookup$freq)
+  p
+  }
+ppxs<-sapply(newLines$tokens,calPpx2)
+ppxs<-ppxs[ppxs<300000]
+summary(ppxs)
+```
+The median is 548.7 and the mean is 7494, better than the unigram model.
+
+trigram perplexity.
+```{r}
+calPpx3<-function(words)
+  {
+  p<-1
+  words<-unlist(words)
+  n<-length(words)
+  if(n<3)
+    p<-calPpx2(words)
+  if(n>=3)
+  {
+    p<-calPpx2(words[1:2])
+    for(i in 1:(n-2))
+    {
+    row<-trigramLookup[trigramLookup$word==paste(words[i],words[i+1],words[i+2]),]
+    if(!is.null(row)&&dim(row)[1]>0&&!is.na(row$prob)&&row$prob>0)
+      p<-p/row$prob
+    else
+      {
+        row<-trigramLookup[trigramLookup$prev==paste(words[i],words[i+1]),]
+        if(!is.null(row)&&dim(row)[1]>0)
+          p<-p*row$freq1[1]
+        else
+          {
+             row<-bigramLookup[bigramLookup$prev==words[i],]
+             if(!is.null(row)&&dim(row)[1]>0)
+               p<-p*row$freq1[1]
+             else
+               p<-p*sum(unigramLookup$freq)
+          }
+      }
+    }
+    p<-p^(1/n)
+  }
+  if(n==0)
+    p<-sum(unigramLookup$freq)
+  p
+  }
+ppxs<-sapply(newLines$tokens,calPpx3)
+summary(ppxs[ppxs<300000])
+```
+The median is 548.7 and the mean is 3988, much better. Therefore, 3-gram models performs well in terms of perplexity.
+
+##Back-off Model
+Here we apply back-off model, which means we use trigram initially, otherwise bigram or unigram if there's good evidence.
+```{r}
+# ngramTokenizer <- function(x) NGramTokenizer(x, Weka_control(min = 1, max = 3))
+# tdmn<-TermDocumentMatrix(cp,control=list(tokenize=ngramTokenizer ))
+# tdmn
+# tdmn<-removeSparseTerms(tdmn,0.64)
+# b<-as.matrix(tdmn)
+# v <- sort(rowSums(b),decreasing=TRUE)
+# ngram_df <- data.table(word = names(v),freq=v)
+# ngram_df$ratio<-ngram_df$freq/sum(ngram_df$freq)
+```
+First, we write a function to obtain predicted words based on previous words.
+```{r}
+getPrediction<-function(preWords=NULL,ngram=NULL)
+  {
+  predictedWord<-NULL
+  if(!is.null(preWords)&&!is.null(ngram))
+    {
+    rows<-ngram[ngram$prev==preWords,]
+    if(dim(rows)[1]>0)
+      predictedWord<-rows$pred[1]
+    }
+  predictedWord
+  }  
+```
+
+We make predictions on each testing item, and calculate the accuracy.
+```{r}
+count<-0
+system.time(
+for(words in lineTokens)
+  {
+  names(words)<-NULL
+  len<-length(words)
+  predictions<-NULL
+  if(len==1)
+    {
+        end<-words[len]
+        prediction<-unigram_df$word[1]
+    }
+  if(len==2)
+    {
+       word2<-words[len-1]
+       end<-words[len]
+       preWords<-word2
+       prediction<-getPrediction(preWords,bigramLookup)
+       if(is.null(prediction))
+         prediction<-unigram_df$word[1]
+    }
+   if(len>2)
+    {
+    word1<-words[len-2]
+    word2<-words[len-1]
+    end<-words[len]
+    preWords<-paste(word1,word2)
+    prediction<-getPrediction(preWords,trigramLookup)
+    if(is.null(prediction))
+      {
+       preWords<-word2
+       prediction<-getPrediction(preWords,bigramLookup)
+       if(is.null(prediction))
+         prediction<-unigram_df$word[1]
+      }
+    }
+      
+    if(!is.null(prediction))
+    if(end==prediction)
+      count=count+1
+  }
+)
+accuracy<-count/length(texts)
+accuracy
+```
+The accuracy is 0.041, further progress on the previous models. And the timing is acceptable.
+
+##Interpolation Model
+Here we use simple interpolation model, assume lamda=1/3. In order to speed up the computing, we select trigram terms for discussion, for example "i am". Also, first we write a function to calculate the updated probability of each text.
+```{r}
+findNextword<-function(line)
+  {
+    prediction<-NULL
+    lambda<-1/3
+    word<-unlist(line)
+    names(word)<-NULL
+    n<-length(word)
+    term1<-paste(word[n-1],word[n])
+    rows<-trigramLookup[trigramLookup$prev==term1,]    
+    size<-dim(rows)
+    if(size[1]>0)
+    {
+      rows$newprob<-0
+      prob<-0
+      for(i in 1:size[1])
+        {
+        prob1<-0
+        prob2<-0
+        prob3<-rows$prob[i]
+        term2<-paste(word[n],rows$pred[i])
+        if(any(unigramLookup$word==rows$pred[i]))
+          prob1<-unigramLookup[unigramLookup$word==rows$pred[i],]$prob
+        if(any(bigramLookup$word==term2))
+          prob2<-bigramLookup[bigramLookup$word==term2,]$prob
+        if(prob<-(prob1+2*prob2+3*prob3))
+          {
+           prob<-(prob1+2*prob2+3*prob3)
+           prediction<-rows$pred[i]
+          }
+        }
+    }
+    else
+      {
+        prob3<-0
+        end<-word[n]
+        rows<-bigramLookup[bigramLookup$prev==end,]
+        size<-dim(rows)
+        if(size[1]>0)
+          {
+          rows$newprob<-0
+          prob<-0
+          for(i in 1:size[1])
+            {
+            prob1<-0
+            prob2<-rows$prob[i]
+            if(any(unigramLookup$word==rows$pred[i]))
+              prob1<-unigramLookup[unigramLookup$word==rows$pred[i],]$prob
+            if(prob<(prob1+2*prob2))
+              {
+                prob<-prob1+2*prob2
+                prediction<-rows$pred[i]
+              }
+            }
+          }
+          else
+            {
+              prediction<-unigramLookup$word[1]
+            }
+      }
+    prediction
+  }
+```
+
+```{r}
+removeLastword<-function(line)
+  {
+  words<-unlist(line)
+  n<-length(words)
+  if(!is.null(words)&&n>0)
+    {
+        words<-words[-n]
+    }
+  words
+  }
+removeEmptyvalue<-function(line)
+  {
+    words<-unlist(line)
+    n<-length(words)
+    if(n>0&&words[n]=="")
+      {
+      words<-words[-n]
+      words<-removeEmptyvalue(words)
+      }
+    words
+  }
+getLastword<-function(line)
+  {
+    words<-unlist(line)
+    n<-length(words)
+    words[n]
+  }
+newLines<-data.table(tokens=lineTokens,lens=lens,isempty=isempty)
+newLines<-newLines[newLines$lens>2,]
+newLines<-newLines[newLines$isempty,]
+testing<-sapply(newLines$tokens,removeEmptyvalue)
+realWords<-sapply(testing,getLastword)
+temp<-sapply(testing,removeLastword)
+system.time(
+predictions<-sapply(temp,findNextword)
+)
+count<-0
+realWords<-unlist(realWords)
+predictions<-unlist(predictions)
+for(i in length(realWords))
+  {
+  if(realWords[i]==predictions[1])
+    count<-count+1
+  }
+accuracy<-count/length(realWords)
+```
+
+It is very time-consuming. And the accuracy is not satisfying.
+
+We have also written a function to fill those new terms with probabilities in corresponding lookups data tables.
+```{r}
+fillTable<-function(line)
+  {
+  rows<-NULL
+  lambda<-1/3
+  word<-unlist(line)
+  n<-length(word)
+  if(n>2)
+    {
+    if(!any(trigramLookup$word==paste(word[n-2],word[n-1],word[n])))##not existed then add one
+      {
+      if(!any(bigramLookup$word==paste(word[n-2],word[n-1])))##not existed then add one
+        {
+         if(!any(unigramLookup$word==word[n-2]))##not existed then add one
+           {
+           newrow<-unigramLookup[1,]
+           newrow$word<-word[n-2]
+           newrow$freq<-1
+           newrow$prob<-1/sum(unigramLookup$freq+1)
+           unigramLookup<-rbind(unigramLookup,newrow)
+           }
+         newrow<-bigramLookup[1,]
+         newrow$word<-paste(word[n-2],word[n-1])
+         newrow$prev<-word[n-2]
+         newrow$pred<-word[n-1]
+         newrow$freq<-1
+         newrow$freq1<-unigramLookup[unigramLookup$word==word[n-2],]$freq
+         newrow$prob<-newrow$freq/newrow$freq1
+         bigramLookup<-rbind(bigramLookup,newrow)
+        }
+      newrow<-trigramLookup[1,]
+      newrow$word<-paste(word[n-2],word[n-1],word[n])
+      newrow$prev<-paste(word[n-2],word[n-1])
+      newrow$pred<-word[n]
+      newrow$freq<-1
+      newrow$freq1<-bigramLookup[bigramLookup$word==newrow$prev,]$freq
+      newrow$prob<-newrow$freq/newrow$freq1
+      trigramLookup<-rbind(trigramLookup,newrow)
+      }
+    }
+  }
+```
+
+##Conclusion
+In this report, we obtained and cleaned the original corpus downloaded from online, then we created data tales of n-gram(n=1,2,3,4) terms with corresponding frequencies and probabilities. Based on these data tables, we build n-gram models to predict words, through calculationg the accuracies and perplexities, trigram models performed the best, and unigram model was not effective. After that, we applied back-off model and interpolation model, back-off model produced better results than previous simple models.
+
